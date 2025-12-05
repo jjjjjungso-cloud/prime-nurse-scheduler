@@ -172,3 +172,58 @@ with tab1:
                 filtered_data, 
                 x="Period", y="Group", color="Nurse", 
                 markers=True, text="Ward", height=400,
+                title="선택한 간호사의 순환 트랙"
+            )
+            fig_route.update_traces(textposition="top center")
+            st.plotly_chart(fig_route, use_container_width=True)
+        else:
+            st.warning("왼쪽에서 간호사를 선택하면 이동 경로 그래프가 나타납니다.")
+
+    st.divider()
+    
+    st.subheader("2. 전체 순환 근무표 (Time Table)")
+    
+    # [수정] 범례(Legend) 추가 (마우스 오버 대신 직관적으로 표시)
+    st.markdown("""
+    <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:10px;">
+        <b>💡 상태 아이콘 설명:</b> &nbsp;&nbsp; 
+        🟢 <b>초록색:</b> 기존 경력자 (OT 불필요 / 즉시 투입) &nbsp;&nbsp;|&nbsp;&nbsp; 
+        🔵 <b>파란색:</b> 신규 순환 (OT 및 교육 진행)
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 시간 순서대로 정렬 (Round_Num 기준)
+    pivot_df = final_schedule.pivot(index="Nurse", columns="Period", values="Display")
+    
+    # 컬럼 순서 강제 정렬 (1~2주, 3~4주 순서대로)
+    sorted_cols = sorted(pivot_df.columns, key=lambda x: int(x.split('~')[0]))
+    pivot_df = pivot_df[sorted_cols]
+    
+    st.dataframe(pivot_df.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
+
+with tab2:
+    st.subheader("조직 역량 커버리지 (Skill Matrix)")
+    st.write("6개월 후 달성하게 될 간호사별 역량 현황입니다.")
+    
+    heatmap_z = []
+    hover_text = []
+    
+    for nurse in all_nurses:
+        row = []
+        txt = []
+        for ward in all_wards_ordered:
+            if ward in base_history.get(nurse, []): 
+                row.append(1.0); txt.append("🟢 베테랑 (기존 경력)")
+            elif ward in current_skills[nurse]: 
+                row.append(0.5); txt.append("🔵 신규 이수 (프로젝트 성과)")
+            else: 
+                row.append(0.0); txt.append("미경험")
+        heatmap_z.append(row); hover_text.append(txt)
+        
+    fig_heat = go.Figure(data=go.Heatmap(
+        z=heatmap_z, x=all_wards_ordered, y=all_nurses, text=hover_text,
+        hovertemplate="<b>%{y}</b> <br>병동: %{x}<br>상태: %{text}<extra></extra>",
+        colorscale=[[0, "#f0f2f6"], [0.5, "#3498DB"], [1, "#27AE60"]], showscale=False, xgap=1, ygap=1
+    ))
+    fig_heat.update_layout(height=600, xaxis={'side':'top', 'tickangle':-45})
+    st.plotly_chart(fig_heat, use_container_width=True)
