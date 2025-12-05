@@ -71,21 +71,20 @@ base_history = {
 # 2. 사이드바: 간호사별 코스 선택
 # ==========================================
 st.sidebar.header("👩‍⚕️ 희망 코스 선택 (Self-Scheduling)")
-st.sidebar.info("각 간호사가 원하는 '시작점'을 선택하면 스케줄이 변경됩니다.")
+st.sidebar.caption("아래 팀 이름을 클릭하여 명단을 펼치세요.") # 안내 문구 추가
 
 user_choices = {}
 
-# 1동 팀 선택창
-with st.sidebar.expander("🔵 1동 팀원 (8명)", expanded=True):
+# [수정됨] expanded=False로 설정하여 기본적으로 접혀있게 함
+with st.sidebar.expander("🔵 1동 팀원 선택 (클릭하여 펼치기)", expanded=False):
     options_1 = list(structure_general.keys())
     for idx, nurse in enumerate(team_1_nurses):
-        # 기본값: 인덱스 순서대로 자동 분산 (겹치지 않게)
         default_idx = idx % len(options_1)
         choice = st.selectbox(f"{nurse}", options_1, index=default_idx, key=nurse)
         user_choices[nurse] = options_1.index(choice)
 
-# 2동 팀 선택창
-with st.sidebar.expander("🔴 2동 팀원 (6명)", expanded=True):
+# [수정됨] expanded=False
+with st.sidebar.expander("🔴 2동 팀원 선택 (클릭하여 펼치기)", expanded=False):
     options_2 = list(structure_special.keys())
     for idx, nurse in enumerate(team_2_nurses):
         default_idx = idx % len(options_2)
@@ -98,7 +97,6 @@ with st.sidebar.expander("🔴 2동 팀원 (6명)", expanded=True):
 current_skills = {nurse: set(history) for nurse, history in base_history.items()}
 
 def create_option_list(structure):
-    # 딕셔너리를 리스트 형태로 변환 (순서 유지)
     return list(structure.items())
 
 def run_simulation(nurses, structure, team_name):
@@ -107,31 +105,22 @@ def run_simulation(nurses, structure, team_name):
     schedule = []
     
     for nurse in nurses:
-        # 사용자가 선택한 Option 번호를 시작점(Offset)으로 사용
         start_offset = user_choices.get(nurse, 0)
         
-        for r in range(total_steps): # 한 바퀴 돌 때까지만 생성
+        for r in range(total_steps):
             if r * 2 >= 24: break
             
-            # 선택한 시작점부터 순서대로 순환
             step_idx = (start_offset + r) % total_steps
             group_name, wards = options_list[step_idx]
-            
-            # 그룹 내 병동 배정 (단순화: 첫 번째 병동)
             ward = wards[0] 
             
             current_skills[nurse].add(ward)
-            
-            # 상태 표시 (이모지)
             is_veteran = ward in base_history.get(nurse, [])
             status_icon = "🟢" if is_veteran else "🔵"
-            
-            # 그룹명 단축 (Option 1... -> G2..)
             short_group = group_name.split('(')[0].replace("Option ", "Route ")
             
             schedule.append({
                 "Team": team_name,
-                # [수정] 기간 표시를 시간 순서대로 정렬하기 좋게 숫자 인덱스 포함
                 "Round_Num": r + 1,
                 "Period": f"{r*2+1}~{(r+1)*2}주",
                 "Nurse": nurse, 
@@ -154,11 +143,9 @@ tab1, tab2 = st.tabs(["🗓️ 순환 근무표 & 이동 경로", "🔥 역량 �
 with tab1:
     st.subheader("1. 간호사별 이동 경로 시각화 (선택 보기)")
     
-    # [수정] 14명을 다 보여주지 않고, 선택한 사람만 보여주는 멀티셀렉트
     col_sel, col_chart = st.columns([1, 3])
     with col_sel:
         st.info("👇 경로를 확인할 간호사를 선택하세요.")
-        # 기본값으로 팀장급 1명씩 선택해둠
         selected_viewers = st.multiselect(
             "간호사 선택", 
             options=all_nurses, 
@@ -183,7 +170,6 @@ with tab1:
     
     st.subheader("2. 전체 순환 근무표 (Time Table)")
     
-    # [수정] 범례(Legend) 추가 (마우스 오버 대신 직관적으로 표시)
     st.markdown("""
     <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:10px;">
         <b>💡 상태 아이콘 설명:</b> &nbsp;&nbsp; 
@@ -192,10 +178,7 @@ with tab1:
     </div>
     """, unsafe_allow_html=True)
     
-    # 시간 순서대로 정렬 (Round_Num 기준)
     pivot_df = final_schedule.pivot(index="Nurse", columns="Period", values="Display")
-    
-    # 컬럼 순서 강제 정렬 (1~2주, 3~4주 순서대로)
     sorted_cols = sorted(pivot_df.columns, key=lambda x: int(x.split('~')[0]))
     pivot_df = pivot_df[sorted_cols]
     
@@ -208,7 +191,9 @@ with tab2:
     heatmap_z = []
     hover_text = []
     
-    for nurse in all_nurses:
+    active_nurses = team_1_nurses + team_2_nurses
+    
+    for nurse in active_nurses:
         row = []
         txt = []
         for ward in all_wards_ordered:
@@ -221,7 +206,7 @@ with tab2:
         heatmap_z.append(row); hover_text.append(txt)
         
     fig_heat = go.Figure(data=go.Heatmap(
-        z=heatmap_z, x=all_wards_ordered, y=all_nurses, text=hover_text,
+        z=heatmap_z, x=all_wards_ordered, y=active_nurses, text=hover_text,
         hovertemplate="<b>%{y}</b> <br>병동: %{x}<br>상태: %{text}<extra></extra>",
         colorscale=[[0, "#f0f2f6"], [0.5, "#3498DB"], [1, "#27AE60"]], showscale=False, xgap=1, ygap=1
     ))
