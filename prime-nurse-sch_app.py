@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta # 날짜 계산을 위한 도구 추가
 
 # ==========================================
 # 1. 기본 설정 및 데이터 정의
@@ -14,12 +14,12 @@ st.set_page_config(
     page_icon="🏥"
 )
 
-st.title("🏥 프라임팀: 데이터 기반 순환근무 시스템 (Visual Ver.)")
+st.title("🏥 프라임팀: 데이터 기반 순환근무 시스템 (2026 Ver.)")
 st.markdown("""
 > **System Features:**
-> 1. **Visual Timeline:** 간트 차트(Gantt)를 통해 6개월 로드맵을 한눈에 파악
-> 2. **Color-Coded Schedule:** 경력/신규 여부에 따른 직관적인 색상 구분
-> 3. **Time-Aware Dispatch:** 현재 시점 기준 최적 인력 추천
+> 1. **Real-Time Dates:** 2026.01.01 시작일 기준, 실제 날짜 자동 계산 표시
+> 2. **Fixed Teams:** 1동(8명) / 2동(6명) 팀 구성 확정
+> 3. **Route Selection:** 간호사가 본인의 선호도에 따라 시작 코스 직접 선택
 """)
 
 # --- 병동 그룹 데이터 ---
@@ -86,9 +86,11 @@ with st.sidebar.expander("🔴 2동 팀원 선택 (클릭)", expanded=False):
         user_choices[nurse] = options_2.index(choice)
 
 # ==========================================
-# 3. 시뮬레이션 로직 (간트차트 데이터 추가)
+# 3. 시뮬레이션 로직 (날짜 계산 추가)
 # ==========================================
 current_skills = {nurse: set(history) for nurse, history in base_history.items()}
+
+# [New] 프로젝트 시작일 설정
 PROJECT_START_DATE = datetime(2026, 1, 1)
 
 def run_simulation(nurses, structure, team_name):
@@ -105,36 +107,27 @@ def run_simulation(nurses, structure, team_name):
             ward = wards[0] 
             
             current_skills[nurse].add(ward)
-            
-            # 상태 구분 (시각화용)
-            if ward in base_history.get(nurse, []):
-                status_icon = "🟢"
-                status_text = "기존경력"
-                color_code = "Veteran" # 간트차트 색상 매핑용
-            else:
-                status_icon = "🔵"
-                status_text = "신규이수"
-                color_code = "New" # 간트차트 색상 매핑용
-
+            status_icon = "🟢" if ward in base_history.get(nurse, []) else "🔵"
             short_group = group_name.split('(')[0].replace("Option ", "Route ")
             
-            # 날짜 계산 (Start, Finish)
+            # [New] 날짜 계산 로직
+            # 1라운드당 2주(14일)씩 더함
             period_start = PROJECT_START_DATE + timedelta(weeks=r*2)
+            # 2주 뒤에서 하루 뺌 (예: 1일~14일)
             period_end = period_start + timedelta(weeks=2, days=-1)
-            date_str = f"{period_start.strftime('%y.%m.%d')}~{period_end.strftime('%m.%d')}"
+            
+            # 문자열 포맷팅 (예: 26.01.01 ~ 01.14 (1차))
+            date_str = f"{period_start.strftime('%y.%m.%d')} ~ {period_end.strftime('%m.%d')}"
             full_period_label = f"{date_str} ({r+1}차)"
             
             schedule.append({
                 "Team": team_name, 
                 "Round_Num": r + 1, 
-                "Period": full_period_label,
-                "Start_Date": period_start, # 간트차트용 날짜 객체
-                "End_Date": period_end,     # 간트차트용 날짜 객체
+                "Period": full_period_label, # 날짜가 포함된 라벨 사용
                 "Nurse": nurse, 
                 "Group": short_group, 
                 "Ward": ward, 
                 "Status": status_icon,
-                "Type": color_code, # Veteran vs New
                 "Display": f"{ward} {status_icon}"
             })
     return pd.DataFrame(schedule)
@@ -144,63 +137,40 @@ df2 = run_simulation(team_2_nurses, structure_special, "2동")
 final_schedule = pd.concat([df1, df2])
 
 # ==========================================
-# 4. 화면 구성 (Visual Upgrade)
+# 4. 화면 구성
 # ==========================================
-tab1, tab2, tab3 = st.tabs(["🗓️ 시각화 로드맵 & 근무표", "🔥 역량 히트맵", "🚑 시점별 인력 추천"])
+tab1, tab2, tab3 = st.tabs(["🗓️ 순환 근무표", "🔥 전체 역량 히트맵", "🚑 시점별 인력 추천"])
 
 with tab1:
-    st.subheader("1. 전체 로드맵 시각화 (Gantt Chart)")
-    st.markdown("누가 언제 어떤 병동에 가는지 **타임라인**으로 확인하세요. (막대 색상: **초록=경력** / **파랑=신규**)")
-    
-    # [NEW] 간트 차트 생성
-    fig_gantt = px.timeline(
-        final_schedule, 
-        x_start="Start_Date", 
-        x_end="End_Date", 
-        y="Nurse", 
-        color="Type", # Veteran vs New 색상 구분
-        text="Ward",  # 막대 위에 병동 이름 표시
-        hover_data=["Group", "Period"],
-        color_discrete_map={"Veteran": "#27AE60", "New": "#3498DB"}, # 초록, 파랑
-        category_orders={"Nurse": all_nurses} # 간호사 이름 순서 정렬
-    )
-    
-    fig_gantt.update_yaxes(autorange="reversed") # 위에서 아래로
-    fig_gantt.update_layout(
-        xaxis_title="기간 (2026년)", 
-        yaxis_title="간호사",
-        showlegend=True,
-        legend_title_text="상태",
-        height=600,
-        xaxis=dict(tickformat="%m-%d") # 날짜 형식
-    )
-    st.plotly_chart(fig_gantt, use_container_width=True)
+    st.subheader("1. 간호사별 이동 경로 시각화")
+    col_sel, col_chart = st.columns([1, 3])
+    with col_sel:
+        st.info("👇 경로를 확인할 간호사를 선택하세요.")
+        selected_viewers = st.multiselect("간호사 선택", options=all_nurses, default=["김유진", "엄현지"])
+    with col_chart:
+        if selected_viewers:
+            filtered_data = final_schedule[final_schedule["Nurse"].isin(selected_viewers)]
+            fig_route = px.line(filtered_data, x="Period", y="Group", color="Nurse", markers=True, text="Ward", height=400)
+            fig_route.update_traces(textposition="top center")
+            st.plotly_chart(fig_route, use_container_width=True)
     
     st.divider()
-    
-    st.subheader("2. 상세 근무표 (Color Table)")
-    
-    # 데이터 피벗
+    st.subheader("2. 전체 순환 근무표 (2026년 상반기)")
+    st.markdown("""
+    <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; margin-bottom:10px; color:black;">
+        <b>💡 상태 아이콘 설명:</b> &nbsp;&nbsp; 
+        🟢 <b>초록색:</b> 기존 경력자 (OT 불필요) &nbsp;&nbsp;|&nbsp;&nbsp; 
+        🔵 <b>파란색:</b> 신규 순환 (교육 필요)
+    </div>
+    """, unsafe_allow_html=True)
+
     pivot_df = final_schedule.pivot(index="Nurse", columns="Period", values="Display")
+    
+    # [Fix] 날짜순 정렬 (Round_Num을 기준으로 정렬하기 위해 다시 매핑)
+    # Period 문자열 안에 있는 "(1차)", "(2차)" 등의 숫자를 읽어서 정렬
     sorted_cols = sorted(pivot_df.columns, key=lambda x: int(x.split('(')[1].replace('차)', '')))
-    pivot_df = pivot_df[sorted_cols]
-
-    # [NEW] 테이블 스타일링 함수 (색칠 공부)
-    def color_coding(val):
-        color = 'black'
-        bg_color = 'white'
-        if '🟢' in str(val):
-            bg_color = '#E9F7EF' # 연한 초록 배경
-        elif '🔵' in str(val):
-            bg_color = '#EBF5FB' # 연한 파랑 배경
-        return f'background-color: {bg_color}; color: {color}'
-
-    # 스타일 적용해서 출력
-    st.dataframe(
-        pivot_df.style.map(color_coding).set_properties(**{'text-align': 'center'}),
-        use_container_width=True,
-        height=600
-    )
+    
+    st.dataframe(pivot_df[sorted_cols].style.set_properties(**{'text-align': 'center'}), use_container_width=True)
 
 with tab2:
     st.subheader("최종 완료 시점(2026년 6월) 역량 히트맵")
@@ -221,13 +191,20 @@ with tab2:
     fig_heat.update_layout(height=600, xaxis={'side':'top', 'tickangle':-45})
     st.plotly_chart(fig_heat, use_container_width=True)
 
+# ---------------------------------------------------------
+# TAB 3: 시점 기반 인력 추천 (날짜 슬라이더 적용)
+# ---------------------------------------------------------
 with tab3:
     st.subheader("🆘 시점 기반 스마트 인력 추천")
+    st.markdown("현재 날짜(기간)를 선택하면, **해당 시점까지 교육을 완료한** 인력만 추천합니다.")
+    
     col_input, col_output = st.columns([1, 2])
     
     with col_input:
+        # 날짜가 포함된 기간 목록 생성
         periods = sorted(final_schedule['Period'].unique(), key=lambda x: int(x.split('(')[1].replace('차)', '')))
         current_period = st.select_slider("⏳ 현재 날짜 선택", options=periods, value=periods[0])
+        
         target_ward = st.selectbox("🚑 지원이 필요한 병동", all_wards_ordered)
         
         current_round_idx = periods.index(current_period)
@@ -237,6 +214,7 @@ with tab3:
         candidates = []
         for nurse in all_nurses:
             score = 0; tag = ""; desc = ""
+            
             if target_ward in base_history.get(nurse, []):
                 score = 100; tag = "🟢 베테랑"; desc = "기존 경력 보유 (즉시 투입)"
             else:
@@ -244,13 +222,16 @@ with tab3:
                 if target_ward in visited_wards:
                     score = 50; tag = "🔵 교육 이수"
                     when = valid_history_df[(valid_history_df['Nurse'] == nurse) & (valid_history_df['Ward'] == target_ward)]['Period'].values[0]
+                    # 날짜만 깔끔하게 추출해서 보여줌
                     simple_date = when.split(' (')[0]
                     desc = f"{simple_date} 기간에 근무 완료"
+            
             if score > 0: candidates.append({"Name": nurse, "Score": score, "Tag": tag, "Desc": desc})
         candidates = sorted(candidates, key=lambda x: x["Score"], reverse=True)
 
     with col_output:
         st.write(f"### 📋 '{current_period.split('(')[0]}' 기준 가용 인력: {len(candidates)}명")
+        
         if not candidates:
             st.warning(f"⚠️ 이 시점에는 아직 '{target_ward}' 경험자가 없습니다.")
         else:
