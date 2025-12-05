@@ -14,12 +14,12 @@ st.set_page_config(
     page_icon="🏥"
 )
 
-st.title("🏥 프라임팀: 데이터 기반 순환근무 시스템 (Self-Scheduling)")
+st.title("🏥 프라임팀: 데이터 기반 순환근무 시스템 (List Ver.)")
 st.markdown("""
 > **System Features:**
-> 1. **Fixed Teams:** 1동(8명) / 2동(6명) 팀 구성 확정
-> 2. **Full Duration:** 2026년 상반기(6개월/24주) 전체 일정 자동 생성
-> 3. **Visual Schedule:** 색상으로 구분된 직관적인 근무표 제공
+> 1. **Route Card:** 간호사별 6개월 이동 경로를 화살표(→)로 직관적 확인
+> 2. **Simple List:** 복잡한 정보 없이 '순서'만 깔끔하게 정리한 리스트 제공
+> 3. **Full Schedule:** 2026년 상반기 전체 일정 자동 생성
 """)
 
 # --- 병동 그룹 데이터 ---
@@ -42,7 +42,6 @@ structure_special = {
     "Option 6 (시작: 격리/특수)": ["82W"]
 }
 
-# 정렬용 리스트
 all_wards_ordered = []
 seen = set()
 for grp in structure_general.values(): 
@@ -89,7 +88,7 @@ with st.sidebar.expander("🔴 2동 팀원 선택 (클릭)", expanded=False):
         user_choices[nurse] = options_2.index(choice)
 
 # ==========================================
-# 3. 시뮬레이션 로직 (12라운드/24주 확장)
+# 3. 시뮬레이션 로직
 # ==========================================
 current_skills = {nurse: set(history) for nurse, history in base_history.items()}
 PROJECT_START_DATE = datetime(2026, 1, 1)
@@ -97,19 +96,14 @@ PROJECT_START_DATE = datetime(2026, 1, 1)
 def run_simulation(nurses, structure, team_name):
     options_list = list(structure.items())
     num_options = len(options_list)
-    
-    # [수정됨] 옵션 개수(7개)와 상관없이 무조건 12라운드(24주)까지 생성
     TARGET_ROUNDS = 12 
-    
     schedule = []
     
     for nurse in nurses:
         start_offset = user_choices.get(nurse, 0)
         
         for r in range(TARGET_ROUNDS):
-            # 순환 로직: 옵션 개수를 넘어가면 다시 처음(Option 1)부터 시작 (Modulo 연산)
             step_idx = (start_offset + r) % num_options
-            
             group_name, wards = options_list[step_idx]
             ward = wards[0] 
             
@@ -119,7 +113,6 @@ def run_simulation(nurses, structure, team_name):
             status_icon = "🟢" if is_veteran else "🔵"
             short_group = group_name.split('(')[0].replace("Option ", "Route ")
             
-            # 날짜 계산
             period_start = PROJECT_START_DATE + timedelta(weeks=r*2)
             period_end = period_start + timedelta(weeks=2, days=-1)
             date_str = f"{period_start.strftime('%y.%m.%d')}~{period_end.strftime('%m.%d')}"
@@ -129,6 +122,7 @@ def run_simulation(nurses, structure, team_name):
                 "Team": team_name, 
                 "Round_Num": r + 1, 
                 "Period": full_period_label,
+                "Short_Period": f"{r+1}차", # 심플 리스트용 짧은 라벨
                 "Nurse": nurse, 
                 "Group": short_group, 
                 "Ward": ward, 
@@ -144,57 +138,57 @@ final_schedule = pd.concat([df1, df2])
 # ==========================================
 # 4. 화면 구성
 # ==========================================
-tab1, tab2, tab3 = st.tabs(["🗓️ 순환 근무표 & 이동 경로", "🔥 역량 히트맵", "🚑 시점별 인력 추천"])
+tab1, tab2, tab3 = st.tabs(["🗓️ 순환 리스트 (List View)", "🔥 역량 히트맵", "🚑 시점별 인력 추천"])
 
 with tab1:
-    st.subheader("1. 간호사별 이동 경로 시각화")
+    st.subheader("1. 🔍 개인별 로드맵 카드 (Individual Route)")
     
-    col_sel, col_chart = st.columns([1, 3])
+    col_sel, col_view = st.columns([1, 3])
     with col_sel:
-        st.info("👇 경로를 확인할 간호사를 선택하세요.")
-        selected_viewers = st.multiselect("간호사 선택", options=all_nurses, default=["김유진", "엄현지"])
-    
-    with col_chart:
-        if selected_viewers:
-            filtered_data = final_schedule[final_schedule["Nurse"].isin(selected_viewers)]
-            fig_route = px.line(filtered_data, x="Period", y="Group", color="Nurse", markers=True, text="Ward", height=400)
-            fig_route.update_traces(textposition="top center")
-            st.plotly_chart(fig_route, use_container_width=True)
-    
+        st.info("이동 경로를 확인할 간호사를 선택하세요.")
+        # 한 명만 선택해서 집중해서 볼 수 있게 Selectbox로 변경
+        target_nurse = st.selectbox("간호사 이름 검색", all_nurses)
+        
+    with col_view:
+        # 선택된 간호사의 데이터 추출
+        nurse_path = final_schedule[final_schedule["Nurse"] == target_nurse].sort_values("Round_Num")
+        
+        # 경로 리스트 만들기 (화살표로 연결)
+        path_list = nurse_path["Ward"].tolist()
+        path_str = "  ➜  ".join(path_list)
+        
+        # 카드 형태로 예쁘게 출력
+        st.markdown(f"""
+        <div style="background-color:#E8F6F3; padding:20px; border-radius:10px; border:2px solid #1ABC9C;">
+            <h3 style="margin:0; color:#16A085;">👩‍⚕️ {target_nurse} 선생님의 6개월 여정</h3>
+            <p style="margin-top:10px; font-size:1.1em; line-height:1.8; color:black; font-weight:bold;">
+            {path_str}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 상세 테이블 (그 사람 것만 깔끔하게)
+        with st.expander(f"{target_nurse} 선생님 상세 일정 보기 (날짜 포함)", expanded=False):
+            st.table(nurse_path[["Period", "Group", "Ward", "Status"]].set_index("Period"))
+
     st.divider()
     
-    # [수정됨] 직관적인 표 시각화
-    st.subheader("2. 전체 순환 근무표 (2026년 상반기)")
-    st.markdown("표 안의 **배경색**을 통해 근무 유형을 직관적으로 확인하세요.")
+    st.subheader("2. 전체 순환 리스트 (Simplified Matrix)")
+    st.markdown("복잡한 정보는 빼고, **'누가 몇 차에 어디 가는지'**만 깔끔하게 보여줍니다.")
     
-    st.markdown("""
-    <div style="display:flex; gap:20px; margin-bottom:10px;">
-        <span style="background-color:#E9F7EF; padding:5px 10px; border-radius:5px; border:1px solid #ccc; color:black;">🟢 <b>기존 경력자</b> (즉시 투입)</span>
-        <span style="background-color:#EBF5FB; padding:5px 10px; border-radius:5px; border:1px solid #ccc; color:black;">🔵 <b>신규 이수자</b> (교육 진행)</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    pivot_df = final_schedule.pivot(index="Nurse", columns="Period", values="Display")
-    # 날짜순 정렬
-    sorted_cols = sorted(pivot_df.columns, key=lambda x: int(x.split('(')[1].replace('차)', '')))
-    pivot_df = pivot_df[sorted_cols]
-
-    # [NEW] 테이블 스타일링 함수 (배경색 입히기)
-    def highlight_cells(val):
-        color = 'black'
-        bg_color = ''
-        if '🟢' in str(val):
-            bg_color = 'background-color: #E9F7EF' # 연한 초록
-        elif '🔵' in str(val):
-            bg_color = 'background-color: #EBF5FB' # 연한 파랑
-        return f'{bg_color}; color: {color}'
-
-    # 스타일 적용하여 출력
-    st.dataframe(
-        pivot_df.style.map(highlight_cells).set_properties(**{'text-align': 'center', 'border': '1px solid #eee'}),
-        use_container_width=True,
-        height=600
-    )
+    # 심플 피벗 테이블 (Round_Num을 컬럼으로)
+    simple_pivot = final_schedule.pivot(index="Nurse", columns="Short_Period", values="Ward")
+    
+    # 컬럼 순서 정렬 (1차, 2차... 12차)
+    sorted_cols = sorted(simple_pivot.columns, key=lambda x: int(x.replace('차', '')))
+    simple_pivot = simple_pivot[sorted_cols]
+    
+    # 테이블 출력 (Highlighting 없이 깔끔하게)
+    st.dataframe(simple_pivot.style.set_properties(**{
+        'text-align': 'center', 
+        'font-weight': 'bold',
+        'border': '1px solid #eee'
+    }), use_container_width=True, height=600)
 
 with tab2:
     st.subheader("최종 완료 시점(2026년 6월) 역량 히트맵")
